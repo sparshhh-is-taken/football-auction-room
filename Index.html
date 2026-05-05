@@ -2,150 +2,85 @@
 <html>
 <head>
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>Auction Room</title>
-
-<!-- Google Font -->
-<link href="https://fonts.googleapis.com/css2?family=Poppins:wght@300;400;600;700&display=swap" rel="stylesheet">
+<title>Auction Game</title>
 
 <style>
-*{
-  margin:0;
-  padding:0;
-  box-sizing:border-box;
-  font-family:'Poppins',sans-serif;
-}
-
 body{
-  background: linear-gradient(135deg,#07121a,#02060b);
+  margin:0;
+  background:#050d14;
   color:white;
+  font-family:sans-serif;
 }
 
-/* CENTER SCREEN */
+/* CENTER */
 .screen{
-  height:100vh;
   display:flex;
   flex-direction:column;
   align-items:center;
   justify-content:center;
-  text-align:center;
-}
-
-/* TITLE */
-.title{
-  font-size:42px;
-  font-weight:700;
-  margin-bottom:10px;
-}
-
-.subtitle{
-  opacity:0.6;
-  margin-bottom:40px;
-}
-
-/* BUTTON CARD */
-.card{
-  background:#0c1a24;
-  padding:25px;
-  border-radius:15px;
-  margin:10px;
-  width:280px;
-  cursor:pointer;
-  transition:0.3s;
-}
-
-.card:hover{
-  transform:scale(1.05);
-  background:#102634;
-}
-
-/* INPUT */
-input{
-  padding:12px;
-  width:100%;
-  margin-top:10px;
-  border:none;
-  border-radius:10px;
-  background:#0c1a24;
-  color:white;
+  height:100vh;
 }
 
 /* BUTTON */
 .btn{
-  margin-top:20px;
-  padding:14px;
-  width:100%;
+  padding:15px;
+  margin:10px;
   border:none;
   border-radius:10px;
-  background:#16c784;
-  color:black;
-  font-weight:600;
+  background:#00ff88;
   cursor:pointer;
 }
 
-/* ROOM UI */
-.room{
+/* ROOM */
+#room{
   padding:20px;
 }
 
-.top-bar{
-  display:flex;
-  justify-content:space-between;
-  margin-bottom:20px;
-}
-
-.player-pool{
+.pool{
   background:#0c1a24;
   padding:15px;
-  border-radius:15px;
-  margin-bottom:20px;
-}
-
-.players-list{
-  position:fixed;
-  bottom:0;
-  width:100%;
-  background:#0c1a24;
-  padding:10px;
-  display:flex;
-  overflow-x:auto;
-}
-
-.player{
-  background:#132b3a;
-  padding:10px;
-  margin-right:10px;
   border-radius:10px;
 }
 
-/* AUCTION UI */
-.auction{
-  padding:20px;
-  text-align:center;
-}
-
-.player-card{
-  background:#0c1a24;
-  padding:25px;
-  border-radius:20px;
-  margin-bottom:20px;
-  border:2px solid gold;
-}
-
-.bid-btn{
-  padding:20px;
+/* PLAYERS BAR */
+.players{
+  position:fixed;
+  bottom:0;
   width:100%;
-  background:red;
-  border:none;
-  border-radius:15px;
-  color:white;
-  font-size:20px;
-  font-weight:600;
+  display:flex;
+  overflow-x:auto;
+  background:#0c1a24;
+}
+
+.player{
+  margin:10px;
+  padding:10px;
+  background:#132b3a;
+  border-radius:10px;
+}
+
+/* AUCTION */
+#auction{
+  text-align:center;
+  padding:20px;
+}
+
+.big{
+  font-size:40px;
 }
 
 .timer{
   font-size:30px;
-  color:#16c784;
-  margin:10px;
+  color:#00ff88;
+}
+
+.bid{
+  background:red;
+  padding:20px;
+  border:none;
+  border-radius:10px;
+  color:white;
+  font-size:20px;
 }
 </style>
 </head>
@@ -154,59 +89,47 @@ input{
 
 <!-- HOME -->
 <div class="screen" id="home">
-  <div class="title">AUCTION ROOM</div>
-  <div class="subtitle">Live Multiplayer Draft</div>
-
-  <div class="card" onclick="showHost()">HOST A ROOM</div>
-  <div class="card" onclick="showJoin()">JOIN A ROOM</div>
+  <h1>Auction Room</h1>
+  <button class="btn" onclick="showHost()">Host</button>
+  <button class="btn" onclick="showJoin()">Join</button>
 </div>
 
 <!-- HOST -->
 <div class="screen" id="host" style="display:none;">
-  <h2>Host Room</h2>
-  <input id="hostName" placeholder="Your Name">
-  <button class="btn" onclick="createRoom()">Create Room</button>
+  <input id="name" placeholder="Name">
+  <button class="btn" onclick="create()">Create</button>
 </div>
 
 <!-- JOIN -->
 <div class="screen" id="join" style="display:none;">
-  <h2>Join Room</h2>
-  <input id="code" placeholder="Room Code">
-  <input id="joinName" placeholder="Your Name">
+  <input id="code" placeholder="Code">
+  <input id="name2" placeholder="Name">
   <button class="btn" onclick="joinRoom()">Join</button>
 </div>
 
 <!-- ROOM -->
-<div class="room" id="room" style="display:none;">
-  
-  <div class="top-bar">
-    <div>Room: <span id="roomCode"></span></div>
-    <button onclick="startAuction()">Start</button>
-  </div>
+<div id="room" style="display:none;">
+  <h2>Room: <span id="roomCode"></span></h2>
 
-  <div class="player-pool">
-    <h3>Player Pool</h3>
-    <input id="playerName" placeholder="Player Name">
-    <button onclick="addPlayer()">Add Player</button>
+  <div class="pool">
+    <input id="playerInput">
+    <button onclick="addPlayer()">Add</button>
     <ul id="pool"></ul>
   </div>
 
+  <button onclick="start()">Start Auction</button>
 </div>
 
 <!-- AUCTION -->
-<div class="auction" id="auction" style="display:none;">
-  
-  <div class="player-card">
-    <h1 id="currentPlayer">Player Name</h1>
-    <div class="timer" id="timer">10</div>
-  </div>
-
-  <button class="bid-btn" onclick="bid()">BID +1</button>
-
+<div id="auction" style="display:none;">
+  <div class="big" id="currentPlayer"></div>
+  <div class="timer" id="timer">10</div>
+  <div>Bid: <span id="bid">0</span></div>
+  <div>Leader: <span id="leader"></span></div>
+  <button class="bid" onclick="bid()">BID</button>
 </div>
 
-<!-- PLAYERS -->
-<div class="players-list" id="players"></div>
+<div class="players" id="players"></div>
 
 <script>
 let socket = new WebSocket("wss://football-auction-pm2k.onrender.com");
@@ -221,29 +144,19 @@ function showJoin(){
   join.style.display="flex";
 }
 
-function createRoom(){
-  socket.send(JSON.stringify({
-    type:"create",
-    name:hostName.value
-  }));
+function create(){
+  socket.send(JSON.stringify({type:"create",name:name.value}));
 }
 
 function joinRoom(){
-  socket.send(JSON.stringify({
-    type:"join",
-    code:code.value,
-    name:joinName.value
-  }));
+  socket.send(JSON.stringify({type:"join",code:code.value,name:name2.value}));
 }
 
 function addPlayer(){
-  socket.send(JSON.stringify({
-    type:"addPlayer",
-    name:playerName.value
-  }));
+  socket.send(JSON.stringify({type:"addPlayer",name:playerInput.value}));
 }
 
-function startAuction(){
+function start(){
   socket.send(JSON.stringify({type:"start"}));
 }
 
@@ -256,23 +169,23 @@ socket.onmessage = (msg)=>{
 
   if(data.type==="room"){
     host.style.display="none";
-    join.style.display="none";
     room.style.display="block";
     roomCode.innerText=data.code;
   }
 
-  if(data.type==="players"){
+  if(data.type==="update"){
     players.innerHTML="";
     data.players.forEach(p=>{
       players.innerHTML+=`<div class="player">${p}</div>`;
     });
-  }
 
-  if(data.type==="pool"){
     pool.innerHTML="";
     data.pool.forEach(p=>{
       pool.innerHTML+=`<li>${p}</li>`;
     });
+
+    bid.innerText=data.bid || 0;
+    leader.innerText=data.bidder || "-";
   }
 
   if(data.type==="auction"){
@@ -284,7 +197,7 @@ socket.onmessage = (msg)=>{
   if(data.type==="timer"){
     timer.innerText=data.time;
   }
-};
+}
 </script>
 
 </body>
