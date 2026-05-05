@@ -1,5 +1,5 @@
 {
-  "name": "auction-game",
+  "name": "football-auction",
   "version": "1.0.0",
   "main": "server.js",
   "scripts": {
