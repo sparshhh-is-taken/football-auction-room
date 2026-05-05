@@ -1,314 +1,358 @@
-// ===== IMPORTS =====
 const express = require("express");
 const app = express();
 const server = require("http").createServer(app);
 const io = require("socket.io")(server);
 
-// ===== MEMORY =====
 let rooms = {};
 
 // ===== ROOM CODE =====
 function generateRoomCode() {
     const chars = "ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789";
-    let code = "";
-    for (let i = 0; i < 6; i++) {
-        code += chars[Math.floor(Math.random() * chars.length)];
-    }
-    return code;
+    return Array.from({length:6},()=>chars[Math.floor(Math.random()*chars.length)]).join("");
 }
 
 // ===== FORMATIONS =====
 const formations = {
     "4-3-3": ["GK","LB","CB","CB","RB","CM","CM","CM","LW","ST","RW"],
-    "4-4-2": ["GK","LB","CB","CB","RB","LM","CM","CM","RM","ST","ST"],
-    "3-5-2": ["GK","CB","CB","CB","LM","CM","CM","CM","RM","ST","ST"]
+    "4-4-2": ["GK","LB","CB","CB","RB","LM","CM","CM","RM","ST","ST"]
 };
 
+// ===== TEAM OVR =====
+function calculateTeamOVR(team){
+    if(!team || team.length===0) return 0;
+    let total=0;
+    team.forEach(p=> total+=p.rating||75);
+    return Math.floor(total/team.length);
+}
+
+// ===== LEADERBOARD =====
+function generateLeaderboard(room){
+    let r=rooms[room];
+    let lb=[];
+
+    r.players.forEach(p=>{
+        lb.push({
+            name:p,
+            ovr:calculateTeamOVR(r.teams[p])
+        });
+    });
+
+    return lb.sort((a,b)=>b.ovr-a.ovr);
+}
+
 // ===== SOCKET =====
-io.on("connection", (socket) => {
+io.on("connection", (socket)=>{
 
-    // CREATE ROOM
-    socket.on("createRoom", ({ name }) => {
-        let code = generateRoomCode();
+    socket.on("createRoom", ({name})=>{
+        let code=generateRoomCode();
 
-        rooms[code] = {
-            host: socket.id,
-            players: [name],
-            budget: { [name]: 100 },
-            teams: {},
-            playerPool: [],
-            allPlayers: [],
-            currentPlayer: null,
-            currentBid: 0,
-            highestBidder: null,
-            timer: null,
-            timeLeft: 10,
-            optedOut: [],
-            readyStatus: { [name]: false },
-            playerSockets: { [name]: socket.id },
-            allowedFormations: ["4-3-3","4-4-2","3-5-2"]
+        rooms[code]={
+            host:socket.id,
+            players:[name],
+            budget:{[name]:100},
+            teams:{},
+            playerPool:[],
+            currentPlayer:null,
+            currentBid:0,
+            highestBidder:null,
+            timer:null,
+            timeLeft:10,
+            optedOut:[],
+            ready:{[name]:false}
         };
 
         socket.join(code);
-        socket.emit("roomCreated", code);
-        io.to(code).emit("updateRoom", rooms[code]);
+        socket.emit("roomCreated",code);
     });
 
-    // JOIN ROOM
-    socket.on("joinRoom", ({ roomCode, name }) => {
-        let r = rooms[roomCode];
-        if (!r) return socket.emit("errorMsg", "Room not found");
-
-        if (r.players.includes(name)) {
-            r.playerSockets[name] = socket.id;
-            socket.join(roomCode);
-            socket.emit("reconnected", r);
-            return;
-        }
-
+    socket.on("joinRoom", ({roomCode,name})=>{
+        let r=rooms[roomCode];
         r.players.push(name);
-        r.budget[name] = 100;
-        r.readyStatus[name] = false;
-        r.playerSockets[name] = socket.id;
+        r.budget[name]=100;
+        r.ready[name]=false;
 
         socket.join(roomCode);
-        io.to(roomCode).emit("updateRoom", r);
     });
 
-    // READY SYSTEM
-    socket.on("toggleReady", ({ room, name }) => {
-        let r = rooms[room];
-        r.readyStatus[name] = !r.readyStatus[name];
-        io.to(room).emit("readyUpdate", r.readyStatus);
+    socket.on("toggleReady", ({room,name})=>{
+        rooms[room].ready[name]=!rooms[room].ready[name];
     });
 
-    // SET PLAYER POOL (HOST)
-    socket.on("setPlayerPool", ({ room, pool }) => {
-        let r = rooms[room];
-        if (socket.id !== r.host) return;
-
-        r.playerPool = pool;
-        r.allPlayers = [...pool];
-
-        io.to(room).emit("updateRoom", r);
+    socket.on("setPlayerPool", ({room,pool})=>{
+        rooms[room].playerPool=pool;
     });
 
-    // START GAME
-    socket.on("startGame", (room) => {
-        let r = rooms[room];
-
-        if (!r.players.every(p => r.readyStatus[p])) return;
-
-        r.currentPlayer = r.playerPool.shift();
-        r.currentBid = r.currentPlayer.basePrice || 10;
-        r.highestBidder = null;
-
+    socket.on("startGame",(room)=>{
+        let r=rooms[room];
+        r.currentPlayer=r.playerPool.shift() || {name:"Random",rating:75,positions:["ST"]};
+        r.currentBid=10;
         startTimer(room);
-        io.to(room).emit("newRound", r);
+        io.to(room).emit("newRound",r);
     });
 
-    // BID
-    socket.on("bid", ({ room, name, amount }) => {
-        let r = rooms[room];
+    socket.on("bid",({room,name,amount})=>{
+        let r=rooms[room];
 
-        if (r.optedOut.includes(name)) return;
-
-        if (amount > r.currentBid && r.budget[name] >= amount) {
-            r.currentBid = amount;
-            r.highestBidder = name;
+        if(amount>r.currentBid && r.budget[name]>=amount){
+            r.currentBid=amount;
+            r.highestBidder=name;
             startTimer(room);
-            io.to(room).emit("bidUpdate", r);
+            io.to(room).emit("bidUpdate",r);
         }
     });
 
-    // OPT OUT
-    socket.on("optOut", ({ room, name }) => {
-        let r = rooms[room];
-        if (!r.optedOut.includes(name)) r.optedOut.push(name);
-        io.to(room).emit("optUpdate", r.optedOut);
+    socket.on("optOut",({room,name})=>{
+        let r=rooms[room];
+        if(!r.optedOut.includes(name)) r.optedOut.push(name);
+    });
+
+    socket.on("finishTeam",(room)=>{
+        let lb=generateLeaderboard(room);
+        io.to(room).emit("leaderboard",lb);
+        io.to(room).emit("winner",lb[0]);
     });
 
 });
 
 // ===== TIMER =====
-function startTimer(room) {
-    let r = rooms[room];
+function startTimer(room){
+    let r=rooms[room];
     clearInterval(r.timer);
 
-    r.timeLeft = 10;
+    r.timeLeft=10;
 
-    r.timer = setInterval(() => {
+    r.timer=setInterval(()=>{
         r.timeLeft--;
-        io.to(room).emit("timerUpdate", r.timeLeft);
+        io.to(room).emit("timerUpdate",r.timeLeft);
 
-        if (r.timeLeft <= 0) {
+        if(r.timeLeft<=0){
             clearInterval(r.timer);
 
-            if (r.highestBidder) {
-                let user = r.highestBidder;
+            if(r.highestBidder){
+                let u=r.highestBidder;
+                if(!r.teams[u]) r.teams[u]=[];
 
-                if (!r.teams[user]) r.teams[user] = [];
-                r.teams[user].push(r.currentPlayer);
-                r.budget[user] -= r.currentBid;
+                r.teams[u].push(r.currentPlayer);
+                r.budget[u]-=r.currentBid;
             }
 
-            if (r.playerPool.length > 0) {
-                r.currentPlayer = r.playerPool.shift();
-                r.currentBid = r.currentPlayer.basePrice || 10;
-                r.highestBidder = null;
-                r.optedOut = [];
-
+            if(r.playerPool.length>0){
+                r.currentPlayer=r.playerPool.shift();
+                r.currentBid=10;
+                r.highestBidder=null;
+                r.optedOut=[];
                 startTimer(room);
-            } else {
-                io.to(room).emit("auctionEnded", r);
+            }else{
+                io.to(room).emit("auctionEnded",r);
             }
 
-            io.to(room).emit("newRound", r);
+            io.to(room).emit("newRound",r);
         }
 
-    }, 1000);
+    },1000);
 }
 
 // ===== FRONTEND =====
-app.get("/", (req, res) => {
-    res.send(`
-    <html>
-    <head>
-    <title>Football Auction Game</title>
-    <style>
-    body { font-family: Arial; text-align: center; }
-    #pitch { display:flex; flex-wrap:wrap; justify-content:center; }
-    .slot {
-        width:70px; height:70px;
-        margin:5px; background:green;
-        color:white; display:flex;
-        align-items:center; justify-content:center;
-    }
-    .player {
-        background:lightblue;
-        margin:5px; padding:5px;
-        cursor:grab;
-    }
-    </style>
-    </head>
+app.get("/", (req,res)=>{
+res.send(`
+<html>
+<head>
+<title>Football Auction</title>
+<style>
+body { background:#0b6623; color:white; text-align:center; font-family:Arial; }
 
-    <body>
+.player {
+  width:80px;height:110px;
+  background:gold;border-radius:10px;
+  margin:5px;padding:5px;
+  cursor:grab;color:black;
+}
 
-    <h2>Create Room</h2>
-    <input id="name"><button onclick="createRoom()">Create</button>
+#pitch { width:320px;height:500px;margin:auto;position:relative;border:2px solid white; }
 
-    <h2>Join</h2>
-    <input id="joinName"><input id="code">
-    <button onclick="joinRoom()">Join</button>
+.slot {
+  position:absolute;width:70px;height:70px;
+  background:rgba(255,255,255,0.2);
+  border-radius:10px;
+}
 
-    <h3 id="room"></h3>
-    <h3 id="timer"></h3>
+#winnerOverlay {
+ position:fixed;top:0;left:0;width:100%;height:100%;
+ background:rgba(0,0,0,0.9);
+ display:none;justify-content:center;align-items:center;
+}
 
-    <input id="bid"><button onclick="bid()">Bid</button>
-    <button onclick="optOut()">Opt Out</button>
+#winnerBox { color:gold;font-size:30px;animation:pop 1s; }
 
-    <button onclick="ready()">Ready</button>
-    <button onclick="start()">Start</button>
+@keyframes pop { from{transform:scale(0);} to{transform:scale(1);} }
 
-    <h2>Pitch</h2>
-    <select id="formation"></select>
-    <div id="pitch"></div>
+</style>
+</head>
 
-    <h2>Players</h2>
-    <div id="bench"></div>
+<body>
 
-    <script src="/socket.io/socket.io.js"></script>
-    <script>
-    const socket = io();
-    let room, name, myTeam = [];
-    const formations = ${JSON.stringify(formations)};
+<h2>Create</h2>
+<input id="name"><button onclick="createRoom()">Create</button>
 
-    function createRoom(){
-        name=document.getElementById("name").value;
-        socket.emit("createRoom",{name});
-    }
+<h2>Join</h2>
+<input id="joinName"><input id="code">
+<button onclick="joinRoom()">Join</button>
 
-    socket.on("roomCreated",(c)=>{
-        room=c;
-        document.getElementById("room").innerText="Room: "+c;
-    });
+<h3 id="room"></h3>
+<h3 id="timer"></h3>
 
-    function joinRoom(){
-        name=document.getElementById("joinName").value;
-        room=document.getElementById("code").value;
-        socket.emit("joinRoom",{roomCode:room,name});
-    }
+<input id="bid"><button onclick="bid()">Bid</button>
+<button onclick="optOut()">Opt Out</button>
 
-    function bid(){
-        socket.emit("bid",{room,name,amount:+document.getElementById("bid").value});
-    }
+<button onclick="ready()">Ready</button>
+<button onclick="start()">Start</button>
 
-    function optOut(){ socket.emit("optOut",{room,name}); }
-    function ready(){ socket.emit("toggleReady",{room,name}); }
-    function start(){ socket.emit("startGame",room); }
+<h2>Pitch</h2>
+<select id="formation"></select>
+<div id="pitch"></div>
 
-    socket.on("timerUpdate",(t)=>{
-        document.getElementById("timer").innerText="Time: "+t;
-    });
+<h2>Players</h2>
+<div id="bench"></div>
 
-    socket.on("auctionEnded",(data)=>{
-        myTeam=data.teams[name]||[];
-        renderBench();
-        loadFormations(data.allowedFormations);
-    });
+<button onclick="finishTeam()">Finish Team</button>
 
-    function loadFormations(list){
-        let s=document.getElementById("formation");
-        s.innerHTML="";
-        list.forEach(f=>{
-            let o=document.createElement("option");
-            o.value=f; o.innerText=f;
-            s.appendChild(o);
-        });
-        s.onchange=renderPitch;
-        renderPitch();
-    }
+<h2>Leaderboard</h2>
+<div id="leaderboard"></div>
 
-    function renderPitch(){
-        let f=document.getElementById("formation").value;
-        let arr=formations[f];
-        let pitch=document.getElementById("pitch");
-        pitch.innerHTML="";
-        arr.forEach(pos=>{
-            let d=document.createElement("div");
-            d.className="slot";
-            d.dataset.pos=pos;
-            d.innerText=pos;
-            d.ondragover=e=>e.preventDefault();
-            d.ondrop=e=>drop(e,d);
-            pitch.appendChild(d);
-        });
-    }
+<div id="winnerOverlay">
+ <div id="winnerBox">
+   🏆 WINNER<br>
+   <span id="winnerName"></span><br>
+   <span id="winnerOVR"></span>
+ </div>
+</div>
 
-    function renderBench(){
-        let b=document.getElementById("bench");
-        b.innerHTML="";
-        myTeam.forEach(p=>{
-            let d=document.createElement("div");
-            d.className="player";
-            d.draggable=true;
-            d.innerText=p.name+"("+p.positions+")";
-            d.ondragstart=e=>e.dataTransfer.setData("p",JSON.stringify(p));
-            b.appendChild(d);
-        });
-    }
+<script src="/socket.io/socket.io.js"></script>
+<script>
+const socket=io();
+let room,name,myTeam=[];
+const formations=${JSON.stringify(formations)};
 
-    function drop(e,slot){
-        let p=JSON.parse(e.dataTransfer.getData("p"));
-        slot.innerText=p.name;
-    }
+function createRoom(){
+ name=document.getElementById("name").value;
+ socket.emit("createRoom",{name});
+}
 
-    </script>
-    </body>
-    </html>
-    `);
+socket.on("roomCreated",(c)=>{
+ room=c;
+ document.getElementById("room").innerText="Room: "+c;
 });
 
-// ===== START SERVER =====
-const PORT = process.env.PORT || 3000;
-server.listen(PORT, () => console.log("Running on port", PORT));
+function joinRoom(){
+ name=document.getElementById("joinName").value;
+ room=document.getElementById("code").value;
+ socket.emit("joinRoom",{roomCode:room,name});
+}
+
+function bid(){
+ socket.emit("bid",{room,name,amount:+document.getElementById("bid").value});
+}
+
+function optOut(){ socket.emit("optOut",{room,name}); }
+function ready(){ socket.emit("toggleReady",{room,name}); }
+function start(){ socket.emit("startGame",room); }
+function finishTeam(){ socket.emit("finishTeam",room); }
+
+socket.on("timerUpdate",(t)=>{
+ document.getElementById("timer").innerText="Time:"+t;
+});
+
+socket.on("auctionEnded",(data)=>{
+ myTeam=data.teams[name]||[];
+ renderBench();
+ loadFormations(Object.keys(formations));
+});
+
+function loadFormations(list){
+ let s=document.getElementById("formation");
+ s.innerHTML="";
+ list.forEach(f=>{
+  let o=document.createElement("option");
+  o.value=f;o.innerText=f;
+  s.appendChild(o);
+ });
+ renderPitch();
+}
+
+function renderPitch(){
+ let f=document.getElementById("formation").value;
+ let arr=formations[f];
+ let pitch=document.getElementById("pitch");
+ pitch.innerHTML="";
+
+ arr.forEach((pos,i)=>{
+  let d=document.createElement("div");
+  d.className="slot";
+  d.dataset.pos=pos;
+
+  d.style.left=(i%4)*80+"px";
+  d.style.top=Math.floor(i/4)*100+"px";
+
+  d.ondragover=e=>e.preventDefault();
+  d.ondrop=e=>drop(e,d);
+
+  pitch.appendChild(d);
+ });
+}
+
+function renderBench(){
+ let b=document.getElementById("bench");
+ b.innerHTML="";
+
+ myTeam.forEach(p=>{
+  let d=document.createElement("div");
+  d.className="player";
+  d.draggable=true;
+
+  d.innerHTML=\`
+   <b>\${p.rating||75}</b><br>
+   \${p.name}<br>
+   \${p.positions}
+  \`;
+
+  d.ondragstart=e=>e.dataTransfer.setData("p",JSON.stringify(p));
+  b.appendChild(d);
+ });
+}
+
+function calculateOVR(p,pos){
+ return p.positions.includes(pos)?p.rating:Math.floor(p.rating*0.7);
+}
+
+function drop(e,slot){
+ let p=JSON.parse(e.dataTransfer.getData("p"));
+ let ovr=calculateOVR(p,slot.dataset.pos);
+
+ slot.innerHTML=\`\${p.name}<br>\${ovr}\`;
+}
+
+socket.on("leaderboard",(data)=>{
+ let div=document.getElementById("leaderboard");
+ div.innerHTML="";
+ data.forEach((p,i)=>{
+  div.innerHTML+=\`#\${i+1} \${p.name} - \${p.ovr}<br>\`;
+ });
+});
+
+const winSound=new Audio("https://www.soundjay.com/human/sounds/applause-8.mp3");
+
+socket.on("winner",(w)=>{
+ document.getElementById("winnerOverlay").style.display="flex";
+ document.getElementById("winnerName").innerText=w.name;
+ document.getElementById("winnerOVR").innerText="OVR: "+w.ovr;
+ winSound.play();
+});
+</script>
+
+</body>
+</html>
+`);
+});
+
+const PORT=process.env.PORT||3000;
+server.listen(PORT);
