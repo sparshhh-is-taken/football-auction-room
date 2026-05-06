@@ -6,7 +6,11 @@ const app = express();
 const server = http.createServer(app);
 const wss = new WebSocket.Server({ server });
 
-app.use(express.static(".")); // serves index.html
+// ✅ FIX FOR "Cannot GET /"
+app.use(express.static(__dirname));
+app.get("/", (req, res) => {
+  res.sendFile(__dirname + "/index.html");
+});
 
 let rooms = {};
 
@@ -27,7 +31,6 @@ wss.on("connection", (ws) => {
       playerName = data.name;
 
       rooms[roomCode] = {
-        host: ws,
         players: [],
         pool: [],
         currentPlayer: null,
@@ -37,7 +40,7 @@ wss.on("connection", (ws) => {
         highestBidder: null
       };
 
-      rooms[roomCode].players.push({ name: playerName, ws, money: 100 });
+      rooms[roomCode].players.push({ name: playerName, ws });
 
       ws.send(JSON.stringify({ type: "room", code: roomCode }));
     }
@@ -49,14 +52,15 @@ wss.on("connection", (ws) => {
 
       if (!rooms[roomCode]) return;
 
-      rooms[roomCode].players.push({ name: playerName, ws, money: 100 });
+      rooms[roomCode].players.push({ name: playerName, ws });
 
       broadcast(roomCode);
     }
 
-    // ADD PLAYER TO POOL
+    // ADD PLAYER
     if (data.type === "addPlayer") {
       if (!rooms[roomCode]) return;
+
       rooms[roomCode].pool.push(data.name);
       broadcast(roomCode);
     }
@@ -129,8 +133,7 @@ function startAuction(code) {
 
 function nextPlayer(code) {
   let room = rooms[code];
-
-  if (room.pool.length === 0) return;
+  if (!room || room.pool.length === 0) return;
 
   let player = room.pool.shift();
 
@@ -148,4 +151,6 @@ function nextPlayer(code) {
   });
 }
 
-server.listen(3000, () => console.log("Server running"));
+server.listen(process.env.PORT || 3000, () => {
+  console.log("Server running");
+});
