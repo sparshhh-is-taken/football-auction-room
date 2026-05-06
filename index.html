@@ -113,7 +113,7 @@ body{
 
   <div class="pool">
     <input id="playerInput">
-    <button onclick="addPlayer()">Add</button>
+    <button onclick="addPlayer()">Add Player</button>
     <ul id="pool"></ul>
   </div>
 
@@ -125,14 +125,14 @@ body{
   <div class="big" id="currentPlayer"></div>
   <div class="timer" id="timer">10</div>
   <div>Bid: <span id="bid">0</span></div>
-  <div>Leader: <span id="leader"></span></div>
+  <div>Leader: <span id="leader">-</span></div>
   <button class="bid" onclick="bid()">BID</button>
 </div>
 
 <div class="players" id="players"></div>
 
 <script>
-let socket = new WebSocket("wss://football-auction-pm2k.onrender.com");
+let socket = new WebSocket("wss://" + location.host);
 
 function showHost(){
   home.style.display="none";
@@ -184,8 +184,8 @@ socket.onmessage = (msg)=>{
       pool.innerHTML+=`<li>${p}</li>`;
     });
 
-    bid.innerText=data.bid || 0;
-    leader.innerText=data.bidder || "-";
+    document.getElementById("bid").innerText = data.bid || 0;
+    document.getElementById("leader").innerText = data.bidder || "-";
   }
 
   if(data.type==="auction"){
