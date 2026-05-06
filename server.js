@@ -1,156 +1,103 @@
 const express = require("express");
 const http = require("http");
-const WebSocket = require("ws");
+const socketIO = require("socket.io");
+const path = require("path");
 
 const app = express();
 const server = http.createServer(app);
-const wss = new WebSocket.Server({ server });
+const io = socketIO(server);
 
-// ✅ FIX FOR "Cannot GET /"
-app.use(express.static(__dirname));
+app.use(express.static(path.join(__dirname, "public")));
+
 app.get("/", (req, res) => {
-  res.sendFile(__dirname + "/index.html");
+  res.sendFile(path.join(__dirname, "public/index.html"));
 });
 
 let rooms = {};
 
-function generateCode() {
+function genCode() {
   return Math.random().toString(36).substring(2, 6).toUpperCase();
 }
 
-wss.on("connection", (ws) => {
-  let roomCode = null;
-  let playerName = null;
+io.on("connection", socket => {
 
-  ws.on("message", (msg) => {
-    const data = JSON.parse(msg);
+  socket.on("host", ({ name, color }) => {
+    const code = genCode();
 
-    // CREATE ROOM
-    if (data.type === "create") {
-      roomCode = generateCode();
-      playerName = data.name;
+    rooms[code] = {
+      players: [],
+      pool: [],
+      current: null,
+      bid: 1,
+      timer: 10,
+      highest: null
+    };
 
-      rooms[roomCode] = {
-        players: [],
-        pool: [],
-        currentPlayer: null,
-        timer: 10,
-        bidding: false,
-        highestBid: 0,
-        highestBidder: null
-      };
+    rooms[code].players.push({ id: socket.id, name, color, money: 100, team: [] });
 
-      rooms[roomCode].players.push({ name: playerName, ws });
-
-      ws.send(JSON.stringify({ type: "room", code: roomCode }));
-    }
-
-    // JOIN ROOM
-    if (data.type === "join") {
-      roomCode = data.code;
-      playerName = data.name;
-
-      if (!rooms[roomCode]) return;
-
-      rooms[roomCode].players.push({ name: playerName, ws });
-
-      broadcast(roomCode);
-    }
-
-    // ADD PLAYER
-    if (data.type === "addPlayer") {
-      if (!rooms[roomCode]) return;
-
-      rooms[roomCode].pool.push(data.name);
-      broadcast(roomCode);
-    }
-
-    // START AUCTION
-    if (data.type === "start") {
-      startAuction(roomCode);
-    }
-
-    // BID
-    if (data.type === "bid") {
-      let room = rooms[roomCode];
-      if (!room || !room.bidding) return;
-
-      room.highestBid += 1;
-      room.highestBidder = playerName;
-      room.timer = 10;
-
-      broadcast(roomCode);
-    }
+    socket.join(code);
+    socket.emit("created", code);
   });
 
-  ws.on("close", () => {
-    if (!roomCode || !rooms[roomCode]) return;
+  socket.on("join", ({ code, name, color }) => {
+    if (!rooms[code]) return;
 
-    rooms[roomCode].players = rooms[roomCode].players.filter(p => p.ws !== ws);
-    broadcast(roomCode);
+    rooms[code].players.push({ id: socket.id, name, color, money: 100, team: [] });
+    socket.join(code);
+
+    io.to(code).emit("players", rooms[code].players);
   });
+
+  socket.on("addPlayer", ({ code, player }) => {
+    rooms[code].pool.push(player);
+    io.to(code).emit("pool", rooms[code].pool);
+  });
+
+  socket.on("start", code => startAuction(code));
+
+  socket.on("bid", code => {
+    let r = rooms[code];
+    r.bid++;
+    r.timer = 10;
+    r.highest = socket.id;
+
+    io.to(code).emit("bid", r.bid);
+  });
+
 });
 
-function broadcast(code) {
-  let room = rooms[code];
-  if (!room) return;
-
-  room.players.forEach(p => {
-    p.ws.send(JSON.stringify({
-      type: "update",
-      players: room.players.map(pl => pl.name),
-      pool: room.pool,
-      bid: room.highestBid,
-      bidder: room.highestBidder
-    }));
-  });
+function startAuction(code) {
+  let r = rooms[code];
+  r.pool.sort(() => Math.random() - 0.5);
+  next(code);
 }
 
-function startAuction(code) {
-  let room = rooms[code];
-  if (!room) return;
+function next(code) {
+  let r = rooms[code];
+  if (!r.pool.length) return;
 
-  nextPlayer(code);
+  r.current = r.pool.shift();
+  r.bid = 1;
+  r.timer = 10;
+  r.highest = null;
 
-  setInterval(() => {
-    if (!room.bidding) return;
+  io.to(code).emit("new", r.current);
 
-    room.timer--;
+  let t = setInterval(() => {
+    r.timer--;
+    io.to(code).emit("timer", r.timer);
 
-    if (room.timer <= 0) {
-      nextPlayer(code);
+    if (r.timer <= 0) {
+      clearInterval(t);
+
+      if (r.highest) {
+        let winner = r.players.find(p => p.id === r.highest);
+        winner.team.push(r.current);
+      }
+
+      next(code);
     }
-
-    room.players.forEach(p => {
-      p.ws.send(JSON.stringify({
-        type: "timer",
-        time: room.timer
-      }));
-    });
-
   }, 1000);
 }
 
-function nextPlayer(code) {
-  let room = rooms[code];
-  if (!room || room.pool.length === 0) return;
-
-  let player = room.pool.shift();
-
-  room.currentPlayer = player;
-  room.timer = 10;
-  room.highestBid = 0;
-  room.highestBidder = null;
-  room.bidding = true;
-
-  room.players.forEach(p => {
-    p.ws.send(JSON.stringify({
-      type: "auction",
-      player: player
-    }));
-  });
-}
-
-server.listen(process.env.PORT || 3000, () => {
-  console.log("Server running");
-});
+server.listen(3000);
